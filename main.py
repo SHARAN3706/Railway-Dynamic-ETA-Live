@@ -25,7 +25,7 @@ app.add_middleware(
 )
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-FRONTEND_DIR = BASE_DIR / "frontend"
+FRONTEND_DIR = BASE_DIR
 
 if FRONTEND_DIR.exists():
     app.mount("/frontend", StaticFiles(directory=str(FRONTEND_DIR)), name="frontend")
@@ -36,7 +36,7 @@ def serve_home():
     if html_file.exists():
         with open(html_file, "r", encoding="utf-8") as f:
             return HTMLResponse(content=f.read(), status_code=200)
-    return HTMLResponse("<h2>Error: frontend/index.html not found</h2>", status_code=404)
+    return HTMLResponse("<h2>Error: index.html not found</h2>", status_code=404)
 
 DEFAULT_SENDER_EMAIL = "ytsharan435@gmail.com"
 DEFAULT_SENDER_APP_PASSWORD = "cnlt ngav yvet dmqf"
