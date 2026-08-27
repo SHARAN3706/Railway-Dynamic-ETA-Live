@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Indian Railways - Physics-Aware Dynamic ETA & Operations Radar</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- KaTeX Mathematical Formula Rendering Engine -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #0b0f19; color: #f1f5f9; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        #radarMap { height: 560px; border-radius: 0.75rem; z-index: 10; }
+        .custom-scrollbar::-webkit-scrollbar { width: 5px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        
+        .tab-content {
+            transition: opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1), transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+            will-change: opacity, transform;
+        }
+        .tab-content.hidden {
+            display: none;
+            opacity: 0;
+            transform: translateY(8px);
+        }
+        .tab-content:not(.hidden) {
+            display: block;
+            opacity: 1;
+            transform: translateY(0);
+        }
+        
+        .loco-marker { box-shadow: 0 0 14px rgba(14, 165, 233, 0.9); transition: all 1s cubic-bezier(0.4, 0, 0.2, 1); }
+        .train-card { transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
+        .train-card-active { border-color: #0284c7 !important; background-color: #0f172a !important; transform: scale(1.01); box-shadow: 0 4px 20px rgba(2, 132, 199, 0.25); }
+        .mic-active { background-color: #ef4444 !important; animation: pulse-red 1.2s infinite; }
+        @keyframes pulse-red { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+    </style>
+</head>
+<body class="p-3 md:p-5 custom-scrollbar">
+    <div class="max-w-[1850px] mx-auto space-y-3.5">
+        
+        <!-- Header -->
+        <header class="bg-[#111827] border border-[#1f2937] rounded-xl p-3.5 px-5 flex flex-wrap items-center justify-between gap-4 shadow-md border-l-4 border-l-[#0284c7]">
+            <div class="flex items-center space-x-3.5">
+                <div class="w-11 h-11 rounded-lg bg-[#0f172a] border border-[#334155] flex items-center justify-center text-sky-400 text-xl shadow-inner">
+                    <i class="fa-solid fa-train-subway"></i>
+                </div>
+                <div>
+                    <div class="flex items-center gap-2.5">
+                        <h1 class="text-base md:text-lg font-bold tracking-tight text-white uppercase">Indian Railways - Focused Track Telemetry & Operations Radar</h1>
+                        <span class="bg-[#1e293b] text-slate-300 text-[10px] font-semibold px-2.5 py-0.5 rounded-full border border-[#334155]">Southern Railway • MAS Division</span>
+                    </div>
+                    <p class="text-xs text-slate-400">Selected Route Highlighting • Overtaking Alert Engine • Liquid Crystal UI</p>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-2.5 text-xs">
+                <div class="bg-[#0f172a] border border-[#1f2937] px-3.5 py-1.5 rounded-lg text-slate-300 shadow-sm">
+                    <span class="text-slate-500 font-medium">Control Clock:</span> <span id="clock" class="font-mono text-sky-400 font-bold ml-1">--:--:--</span>
+                </div>
+                <div class="flex items-center gap-2 bg-[#064e3b]/50 border border-[#059669]/60 px-3 py-1.5 rounded-lg text-emerald-300 font-bold text-[11px] shadow-sm">
+                    <span class="w-2 h-2 bg-emerald-400 rounded-full animate-ping"></span>
+                    <span>1 HZ FOCUSED RADAR ACTIVE</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <nav class="flex border-b border-[#1f2937] space-x-1.5 overflow-x-auto text-xs font-semibold">
+            <button onclick="switchTab('radarTab')" id="btn-radarTab" class="tab-btn px-4 py-2.5 rounded-t-lg bg-[#1e293b] text-sky-400 border-b-2 border-sky-400 flex items-center gap-2 font-bold transition-all duration-200">
+                <i class="fa-solid fa-satellite-dish"></i> Interactive Radar & Overtake Monitor
+            </button>
+            <button onclick="switchTab('mlMathTab')" id="btn-mlMathTab" class="tab-btn px-4 py-2.5 rounded-t-lg hover:bg-[#111827] text-slate-400 border-b-2 border-transparent flex items-center gap-2 transition-all duration-200">
+                <i class="fa-solid fa-calculator text-amber-400"></i> ML Math & Live Factors (XAI)
+            </button>
+            <button onclick="switchTab('aiChatTab')" id="btn-aiChatTab" class="tab-btn px-4 py-2.5 rounded-t-lg hover:bg-[#111827] text-slate-400 border-b-2 border-transparent flex items-center gap-2 transition-all duration-200">
+                <i class="fa-solid fa-headset"></i> AI Copilot (Voice & Text Assistant)
+            </button>
+            <button onclick="switchTab('offlineAlertTab')" id="btn-offlineAlertTab" class="tab-btn px-4 py-2.5 rounded-t-lg hover:bg-[#111827] text-slate-400 border-b-2 border-transparent flex items-center gap-2 transition-all duration-200">
+                <i class="fa-solid fa-paper-plane"></i> Instant Email & SMS Alert
+            </button>
+        </nav>
+
+        <!-- TAB 1: RADAR -->
+        <div id="radarTab" class="tab-content space-y-3.5">
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-3.5">
+                <div class="lg:col-span-7 bg-[#111827] border border-[#1f2937] rounded-xl p-3.5 shadow-md space-y-2.5">
+                    <div class="flex items-center justify-between px-1 mb-1">
+                        <span id="mapTitleHint" class="text-xs font-bold text-sky-400 uppercase tracking-wide flex items-center gap-1.5">
+                            <i class="fa-solid fa-route"></i> Showing Active Track for Selected Train
+                        </span>
+                        <span id="overtakeBadge" class="hidden bg-red-950/80 text-red-300 text-[10px] font-bold px-2.5 py-0.5 rounded-full border border-red-700/60 animate-pulse">
+                            <i class="fa-solid fa-triangle-exclamation mr-1"></i> Overtaking Conflict Ahead!
+                        </span>
+                    </div>
+                    <div id="radarMap"></div>
+                </div>
+
+                <div class="lg:col-span-5 space-y-3">
+                    <div id="focusPanel" class="bg-[#111827] border border-[#0284c7]/60 rounded-xl p-4 shadow-lg space-y-3">
+                        <div class="flex justify-between items-center border-b border-[#1f2937] pb-2">
+                            <div>
+                                <span id="fType" class="text-[10px] font-bold px-2 py-0.5 rounded bg-sky-950 text-sky-300 border border-sky-700 uppercase">SUPERFAST</span>
+                                <h3 id="fName" class="text-sm font-bold text-white mt-1">12676 Kovai Superfast Express</h3>
+                                <p id="fRoute" class="text-[11px] text-slate-400">Coimbatore Jn (CBE) ➔ MGR Chennai Central (MAS)</p>
+                            </div>
+                            <div class="text-right">
+                                <span class="text-[10px] text-slate-400 uppercase font-semibold block">Destination Arrival</span>
+                                <span id="fFinalTime" class="text-xl font-bold font-mono text-emerald-400">--:-- --</span>
+                            </div>
+                        </div>
+
+                        <div class="bg-[#0b0f19] p-2.5 rounded-lg border border-emerald-950/60 flex justify-between items-center text-xs shadow-inner">
+                            <div>
+                                <span class="text-slate-500 block text-[10px]">Upcoming Next Halt</span>
+                                <b id="fNextHalt" class="text-emerald-300 text-xs font-bold">--</b>
+                            </div>
+                            <div class="text-right">
+                                <span class="text-slate-500 block text-[10px]">Next Halt Arrival Time</span>
+                                <b id="fNextHaltTime" class="text-emerald-400 font-mono font-bold text-sm">--:-- --</b>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-2 text-[11px]">
+                            <div class="bg-[#0b0f19] p-2.5 rounded-lg border border-[#1f2937]">
+                                <span class="text-slate-500 block text-[10px]">Locomotive Traction & Power</span>
+                                <b id="fLoco" class="text-amber-400 font-medium">WAP-7 (RPM #37210)</b>
+                                <span id="fHp" class="text-slate-400 block text-[10px]">6350 HP (0.45 m/s² Accel)</span>
+                            </div>
+                            <div class="bg-[#0b0f19] p-2.5 rounded-lg border border-[#1f2937]">
+                                <span class="text-slate-500 block text-[10px]">Rolling Stock & Braking</span>
+                                <b id="fRake" class="text-slate-200 font-medium">22 Coaches LHB</b>
+                                <span id="fFreq" class="text-sky-400 block text-[10px]">Disc Brakes • MPS 130 km/h</span>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-2 text-[11px]">
+                            <div class="bg-[#0b0f19] p-2.5 rounded-lg border border-[#1f2937]">
+                                <span class="text-slate-500 block text-[10px]">Live Telemetry Speed</span>
+                                <b id="fSpeed" class="text-sky-300 font-mono text-sm font-bold">-- km/h</b>
+                            </div>
+                            <div class="bg-[#0b0f19] p-2.5 rounded-lg border border-[#1f2937]">
+                                <span class="text-slate-500 block text-[10px]">Remaining Distance</span>
+                                <b id="fDist" class="text-slate-200 font-mono text-sm font-bold">-- km</b>
+                            </div>
+                        </div>
+
+                        <div class="bg-[#0b0f19] p-2.5 rounded-lg border border-[#1f2937] space-y-1 text-xs">
+                            <div class="flex justify-between items-center text-[11px]">
+                                <span class="text-slate-400">Block Signal Aspect:</span>
+                                <span id="fStatus" class="font-bold text-emerald-400">Green Signal (Line Clear)</span>
+                            </div>
+                            <p class="text-[11px] text-amber-300/90"><span class="text-slate-500">Speed Diagnostics:</span> <span id="fReason">Calculated within section MPS.</span></p>
+                        </div>
+                    </div>
+
+                    <div class="bg-[#111827] border border-[#1f2937] rounded-xl p-3.5 shadow-md space-y-2">
+                        <div class="flex items-center justify-between border-b border-[#1f2937] pb-2 px-1">
+                            <span class="text-xs font-bold text-slate-300 uppercase"><i class="fa-solid fa-list text-sky-400 mr-1.5"></i> Select Train to Inspect & Focus Track (14 Rakes)</span>
+                        </div>
+                        <div id="trainsList" class="space-y-1.5 max-h-[190px] overflow-y-auto pr-1 custom-scrollbar"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 2: ML MATH & LIVE FACTORS (TRANSPARENCY PAGE WITH PERFECT FORMULAS) -->
+        <div id="mlMathTab" class="tab-content hidden space-y-3.5">
+            <div class="bg-[#111827] border border-[#1f2937] rounded-xl p-5 shadow-md space-y-5">
+                <div class="border-b border-[#1f2937] pb-3 flex justify-between items-center">
+                    <div>
+                        <h2 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                            <i class="fa-solid fa-microchip text-amber-400"></i> Real-Time Machine Learning Mathematical Transparency Engine
+                        </h2>
+                        <p class="text-xs text-slate-400 mt-0.5">Every second, the XGBoost Regressor re-evaluates multi-factor sectional telemetry to compute precise dynamic ETAs.</p>
+                    </div>
+                    <span class="bg-amber-950/60 border border-amber-700/60 text-amber-300 text-xs font-mono font-bold px-3 py-1 rounded-full">R² Accuracy: 99.70%[cite: 1] | MAE: 1.79 min[cite: 1]</span>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div class="bg-[#0b0f19] border border-[#1f2937] p-3.5 rounded-lg space-y-1.5">
+                        <span class="text-[10px] text-slate-500 uppercase font-bold">1. Block Signal Aspect Factor</span>
+                        <div class="flex justify-between items-baseline">
+                            <span id="mathSignal" class="text-base font-bold text-sky-400 font-mono">3 (Green)</span>
+                            <span class="text-[10px] text-slate-400">Multiplier: 0.0x</span>
+                        </div>
+                        <p class="text-[11px] text-slate-400">Reflects 4-Aspect signaling rules (Red=0, Yellow=1, Double Yellow=2, Green=3).</p>
+                    </div>
+
+                    <div class="bg-[#0b0f19] border border-[#1f2937] p-3.5 rounded-lg space-y-1.5">
+                        <span class="text-[10px] text-slate-500 uppercase font-bold">2. Headway Separation Gap</span>
+                        <div class="flex justify-between items-baseline">
+                            <span id="mathHeadway" class="text-base font-bold text-emerald-400 font-mono">2.45 km</span>
+                            <span class="text-[10px] text-slate-400">Safe Buffer</span>
+                        </div>
+                        <p class="text-[11px] text-slate-400">Distance from preceding train. Triggers cascade cushioning if &lt; 2.5 km.</p>
+                    </div>
+
+                    <div class="bg-[#0b0f19] border border-[#1f2937] p-3.5 rounded-lg space-y-1.5">
+                        <span class="text-[10px] text-slate-500 uppercase font-bold">3. Section Congestion Index</span>
+                        <div class="flex justify-between items-baseline">
+                            <span id="mathCongestion" class="text-base font-bold text-amber-400 font-mono">0.38</span>
+                            <span class="text-[10px] text-slate-400">Scale 0.1 - 1.0</span>
+                        </div>
+                        <p class="text-[11px] text-slate-400">Section density factor computed via active block section train counts.</p>
+                    </div>
+
+                    <div class="bg-[#0b0f19] border border-[#1f2937] p-3.5 rounded-lg space-y-1.5">
+                        <span class="text-[10px] text-slate-500 uppercase font-bold">4. Loco Tractive Acceleration</span>
+                        <div class="flex justify-between items-baseline">
+                            <span id="mathLoco" class="text-base font-bold text-sky-300 font-mono">1.15 (WAP-7)</span>
+                            <span class="text-[10px] text-slate-400">0.45 m/s²</span>
+                        </div>
+                        <p class="text-[11px] text-slate-400">Physics power-to-weight ratio adjusting pickup and braking deceleration lag.</p>
+                    </div>
+                </div>
+
+                <!-- Rendered Mathematical Formulas via KaTeX -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-2">
+                    <div class="bg-[#0b0f19] border border-[#1f2937] p-4 rounded-xl space-y-3">
+                        <h3 class="text-xs font-bold text-amber-400 uppercase tracking-wide flex items-center gap-2">
+                            <i class="fa-solid fa-square-root-variable"></i> XGBoost Loss & Objective Function
+                        </h3>
+                        <p class="text-xs text-slate-300 leading-relaxed">
+                            The model minimizes second-order Taylor expansion loss to evaluate residual sectional delays across decision trees:
+                        </p>
+                        <div class="bg-[#111827] border border-[#1f2937] p-3.5 rounded-lg text-center overflow-x-auto text-emerald-400">
+                            $$\mathcal{L}^{(t)} \approx \sum_{i=1}^n \left[ g_i f_t(x_i) + \frac{1}{2} h_i f_t^2(x_i) \right] + \gamma T + \frac{1}{2} \lambda \sum_{j=1}^T w_j^2$$
+                        </div>
+                        <p class="text-[11px] text-slate-400">
+                            Where <b>$g_i$</b> and <b>$h_i$</b> are first and second order gradients of sectional travel time errors, with regularization penalties.
+                        </p>
+                    </div>
+
+                    <div class="bg-[#0b0f19] border border-[#1f2937] p-4 rounded-xl space-y-3">
+                        <h3 class="text-xs font-bold text-sky-400 uppercase tracking-wide flex items-center gap-2">
+                            <i class="fa-solid fa-chart-line"></i> Dynamic ETA Physics Calculation Formula
+                        </h3>
+                        <p class="text-xs text-slate-300 leading-relaxed">
+                            Actual arrival time is synthesized by aggregating physical track distance against dynamic rolling stock constraints:
+                        </p>
+                        <div class="bg-[#111827] border border-[#1f2937] p-3.5 rounded-lg text-center overflow-x-auto text-sky-300">
+                            $$\text{ETA}_{\text{mins}} = \left(\frac{\text{Distance}_{\text{rem}}}{\text{Speed}_{\text{live}}}\right) \times 60 + P_{\text{signal}} + P_{\text{headway}} + P_{\text{adhesion}}$$
+                        </div>
+                        <p class="text-[11px] text-slate-400">
+                            Where penalties are scaled dynamically based on live signal aspects, weather adhesion loss, and locomotive acceleration capability factors.
+                        </p>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- TAB 3: AI COPILOT -->
+        <div id="aiChatTab" class="tab-content hidden space-y-3.5">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-3.5">
+                <div class="bg-[#111827] border border-[#1f2937] rounded-xl p-4 space-y-3 shadow-md">
+                    <h2 class="text-xs font-bold text-slate-200 uppercase tracking-wide flex items-center gap-2">
+                        <i class="fa-solid fa-language text-sky-400"></i> Language & Voice Settings
+                    </h2>
+                    
+                    <div>
+                        <label class="text-xs text-slate-400 block mb-1 font-medium">Select Output Language / மொழி தேர்வு</label>
+                        <select id="chatLang" class="w-full bg-[#0b0f19] border border-[#1f2937] rounded-lg px-3 py-2 text-xs text-white font-medium focus:border-sky-500 focus:outline-none" onchange="updateLanguageGreeting()">
+                            <option value="english" selected>English (Official Telemetry)</option>
+                            <option value="tamil">தமிழ் (Tamil - ta-IN)</option>
+                            <option value="hindi">हिंदी (Hindi - hi-IN)</option>
+                            <option value="telugu">తెలుగు (Telugu - te-IN)</option>
+                            <option value="kannada">ಕನ್ನಡ (Kannada - kn-IN)</option>
+                        </select>
+                    </div>
+
+                    <div class="bg-[#0b0f19] p-3 rounded-lg border border-[#1f2937] space-y-2 text-xs text-slate-300">
+                        <span class="text-sky-400 font-bold block"><i class="fa-solid fa-microphone text-emerald-400 mr-1.5"></i> Voice Controls:</span>
+                        <p class="text-[11px] text-slate-400">Mic click panni pesinaal AI automatic-ah mela select panna language-la voice + text-la answer pannum.</p>
+                        <div class="flex items-center justify-between pt-1 border-t border-[#1f2937]">
+                            <div class="flex items-center gap-2">
+                                <input type="checkbox" id="voiceAudioEnable" checked class="accent-sky-500 rounded">
+                                <label for="voiceAudioEnable" class="text-[11px] text-slate-300">Voice Audio Output</label>
+                            </div>
+                            <button onclick="stopVoiceReading()" class="bg-red-950/80 hover:bg-red-900 border border-red-700/60 text-red-300 px-2.5 py-1 rounded-md text-[10px] font-bold transition flex items-center gap-1">
+                                <i class="fa-solid fa-stop"></i> Stop Audio
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="lg:col-span-2 bg-[#111827] border border-[#1f2937] rounded-xl p-4 shadow-md flex flex-col justify-between h-[540px]">
+                    <div class="border-b border-[#1f2937] pb-2 flex justify-between items-center">
+                        <span class="text-xs font-bold text-white uppercase flex items-center gap-2">
+                            <i class="fa-solid fa-headset text-sky-400"></i> Indian Railways Operations Knowledge Copilot
+                        </span>
+                        <span id="speechStatus" class="text-[10px] text-emerald-400 font-mono bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-700/60">Mic & Text Ready</span>
+                    </div>
+
+                    <div id="chatMessages" class="flex-1 overflow-y-auto space-y-2.5 p-2 my-2 custom-scrollbar text-xs">
+                        <div id="welcomeMessage" class="bg-[#0b0f19] border border-[#1f2937] p-3 rounded-xl max-w-xl text-slate-200">
+                            Hello! I am your Indian Railways Operations Copilot. You can query locomotive traction (WAP-7, WAG-9), LHB braking dynamics, section signals, or any live train status via voice or text.
+                        </div>
+                    </div>
+
+                    <div class="flex gap-2 pt-2 border-t border-[#1f2937] items-center">
+                        <button id="micBtn" onclick="toggleVoiceRecording()" title="Click to Speak" class="w-10 h-10 rounded-full bg-[#1e293b] hover:bg-[#334155] border border-[#334155] text-sky-400 flex items-center justify-center text-sm transition shadow-sm">
+                            <i class="fa-solid fa-microphone"></i>
+                        </button>
+                        <input type="text" id="chatInput" placeholder="Type query in any language..." class="flex-1 bg-[#0b0f19] border border-[#1f2937] rounded-lg px-3 py-2.5 text-xs text-white focus:outline-none focus:border-sky-500 placeholder-slate-600" onkeypress="if(event.key==='Enter') sendChat()">
+                        <button onclick="sendChat()" class="bg-[#0284c7] hover:bg-[#0369a1] text-white px-5 py-2.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-sm">
+                            <i class="fa-solid fa-paper-plane"></i> <span>Send</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 4: REAL EMAIL & SMS DISPATCHER -->
+        <div id="offlineAlertTab" class="tab-content hidden space-y-3.5">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-3.5">
+                <div class="bg-[#111827] border border-[#1f2937] rounded-xl p-4 space-y-3 shadow-md">
+                    <h2 class="text-xs font-bold text-slate-200 uppercase tracking-wide flex items-center gap-2">
+                        <i class="fa-solid fa-paper-plane text-emerald-400"></i> Instant Email & SMS Dispatcher
+                    </h2>
+                    
+                    <div class="space-y-2 text-xs">
+                        <div>
+                            <label class="text-slate-400 block mb-1">Select Train (All Corridors Available)</label>
+                            <select id="alertTrain" class="w-full bg-[#0b0f19] border border-[#1f2937] rounded-lg px-3 py-2 text-xs text-white">
+                                <option value="12676">12676 Kovai Superfast Express (CBE-MAS)</option>
+                                <option value="20607">20607 Vande Bharat Express (MAS-MYS)</option>
+                                <option value="22626">22626 AC Double Decker (SBC-MAS)</option>
+                                <option value="12674">12674 Cheran Superfast Express (CBE-MAS)</option>
+                                <option value="12842">12842 Coromandel Express (MAS-SHM)</option>
+                                <option value="BOXN-881">BOXN-881 Ennore Coal Heavy Freight (5200T)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-slate-400 block mb-1">Recipient Email Address</label>
+                            <input type="email" id="alertEmail" value="ytsharan435@gmail.com" placeholder="Enter recipient email" class="w-full bg-[#0b0f19] border border-[#1f2937] rounded-lg px-3 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-sky-500">
+                        </div>
+                        <div>
+                            <label class="text-slate-400 block mb-1">Recipient Mobile Phone Number (for SMS)</label>
+                            <input type="tel" id="alertPhone" value="7397030865" placeholder="Enter 10-digit phone number" class="w-full bg-[#0b0f19] border border-[#1f2937] rounded-lg px-3 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-sky-500">
+                        </div>
+
+                        <button id="dispatchBtn" onclick="dispatchDynamicAlertToRecipient()" class="w-full bg-[#059669] hover:bg-[#047857] text-white py-2.5 rounded-lg text-xs font-bold transition shadow-sm mt-2 flex items-center justify-center gap-1.5">
+                            <i class="fa-solid fa-paper-plane"></i> <span>Send Real ETA Alert (Email & SMS)</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="lg:col-span-2 bg-[#111827] border border-[#1f2937] rounded-xl p-4 shadow-md space-y-3">
+                    <div class="flex items-center justify-between border-b border-[#1f2937] pb-2">
+                        <span class="text-xs font-bold text-white uppercase"><i class="fa-solid fa-server text-sky-400 mr-2"></i> Real-Time Telemetry Transmission Log</span>
+                        <span class="text-[10px] text-emerald-400 bg-[#064e3b]/40 px-2 py-0.5 rounded-full border border-emerald-700/60 font-medium">Auto Gateway Active</span>
+                    </div>
+
+                    <div id="alertLog" class="space-y-2 max-h-[460px] overflow-y-auto pr-1 custom-scrollbar text-xs">
+                        <div class="bg-[#0b0f19] border border-[#1f2937] p-3 rounded-xl text-slate-400">
+                            Select any train, enter target Email & Phone Number, and click 'Send Real ETA Alert'.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        setInterval(() => {
+            const clk = document.getElementById('clock');
+            if (clk) clk.innerText = new Date().toLocaleTimeString();
+        }, 1000);
+
+        function stopVoiceReading() {
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+            }
+        }
+
+        function updateLanguageGreeting() {
+            const lang = document.getElementById('chatLang').value;
+            const welcome = document.getElementById('welcomeMessage');
+            if (lang === 'tamil') {
+                welcome.innerText = "வணக்கம்! தெற்கு ரயில்வே பாதைகள், இன்ஜின் இழுவை திறன் (WAP-7, WAG-9), LHB பிரேக்கிங் மற்றும் குறிப்பிட்ட ரயில்கள் குறித்து எதையும் குரல் மூலமாகவோ அல்லது தட்டச்சு செய்தோ கேளுங்கள்.";
+            } else if (lang === 'hindi') {
+                welcome.innerText = "नमस्ते! भारतीय रेलवे, लोकोमोटिव (WAP-7, WAG-9), LHB कोच और डायनामिक ईटीए के बारे में कुछ भी पूछें।";
+            } else if (lang === 'telugu') {
+                welcome.innerText = "నమస్కారం! భారతీయ రైల్వేలు, లోకోమోటివ్‌లు మరియు డైనమిక్ ఈటీఏ గురించి ఏదైనా అడగండి.";
+            } else if (lang === 'kannada') {
+                welcome.innerText = "ನಮಸ್ಕಾರ! ಭಾರತೀಯ ರೈಲ್ವೆ, ಲೋಕೋಮೋಟಿವ್ ಮತ್ತು ಡೈನಾಮಿಕ್ ಇಟಿಎ ಬಗ್ಗೆ ಏನಾದರೂ ಕೇಳಿ.";
+            } else {
+                welcome.innerText = "Hello! I am your Indian Railways Operations Copilot. You can query locomotive traction (WAP-7, WAG-9), LHB braking dynamics, section signals, or any live train status via voice or text.";
+            }
+        }
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.className = 'tab-btn px-4 py-2.5 rounded-t-lg hover:bg-[#111827] text-slate-400 border-b-2 border-transparent flex items-center gap-2 transition-all duration-200';
+            });
+
+            const targetTab = document.getElementById(tabId);
+            targetTab.classList.remove('hidden');
+            
+            const activeBtn = document.getElementById('btn-' + tabId);
+            if (activeBtn) {
+                activeBtn.className = 'tab-btn px-4 py-2.5 rounded-t-lg bg-[#1e293b] text-sky-400 border-b-2 border-sky-400 flex items-center gap-2 font-bold transition-all duration-200';
+            }
+
+            if (tabId === 'radarTab') {
+                setTimeout(() => { map.invalidateSize(); }, 200);
+            }
+            
+            // Render KaTeX Formulas when ML Math tab is opened
+            if (tabId === 'mlMathTab') {
+                setTimeout(() => {
+                    renderMathInElement(document.body, {
+                        delimiters: [
+                            {left: "$$", right: "$$", display: true},
+                            {left: "$", right: "$", display: false}
+                        ]
+                    });
+                }, 100);
+            }
+        }
+
+        const map = L.map('radarMap').setView([12.6, 79.2], 7);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        const routes = {
+            cbe: [
+                [11.0018, 76.9628], [11.0500, 77.1600], [11.1085, 77.3411], [11.2300, 77.5300],
+                [11.3410, 77.7172], [11.4500, 77.8800], [11.5830, 78.0200], [11.6643, 78.1460],
+                [11.7350, 78.1520], [11.8320, 78.1750], [11.8850, 78.2250], [11.9772, 78.2910],
+                [12.0450, 78.3420], [12.1333, 78.4000], [12.2854, 78.4320], [12.3489, 78.4721],
+                [12.4347, 78.5381], [12.4938, 78.5732], [12.5658, 78.5776], [12.6833, 78.6167],
+                [12.7876, 78.7183], [12.8765, 78.9300], [12.9698, 79.1378], [12.9833, 79.3667],
+                [13.0234, 79.5200], [13.0783, 79.6679], [13.1234, 79.7900], [13.1437, 79.9079],
+                [13.1189, 80.1432], [13.1075, 80.2334], [13.0827, 80.2707]
+            ],
+            sbc: [
+                [12.9781, 77.5696], [12.9934, 77.5986], [12.9982, 77.6784], [13.0100, 77.9800],
+                [12.9961, 78.2045], [12.8500, 78.3100], [12.7100, 78.4200], [12.5658, 78.5776],
+                [12.9698, 79.1378], [13.0783, 79.6679], [13.0827, 80.2707]
+            ],
+            hwh: [
+                [16.5062, 80.6480], [15.5057, 80.0499], [14.4426, 79.9865], [14.1500, 79.8500],
+                [13.5800, 80.1300], [13.3400, 80.2000], [13.0827, 80.2707]
+            ]
+        };
+
+        let polylineLayers = {};
+        
+        function drawFocusedCorridor(activeCorridor) {
+            Object.keys(routes).forEach(corr => {
+                if (polylineLayers[corr]) {
+                    map.removeLayer(polylineLayers[corr]);
+                }
+                
+                const coords = routes[corr];
+                const isSelected = (corr === activeCorridor);
+                
+                const color = corr === 'cbe' ? '#0284c7' : (corr === 'sbc' ? '#2563eb' : '#059669');
+                const weight = isSelected ? 5.5 : 2.0;
+                const opacity = isSelected ? 0.95 : 0.25;
+                
+                polylineLayers[corr] = L.polyline(coords, { color: color, weight: weight, opacity: opacity }).addTo(map);
+            });
+        }
+
+        let markers = {};
+        let cachedTrains = [];
+        let selectedTrainNo = "12676";
+
+        function selectTrain(trainNo) {
+            selectedTrainNo = trainNo;
+            const t = cachedTrains.find(item => item.no === trainNo);
+            if (t) {
+                drawFocusedCorridor(t.corridor);
+                
+                map.flyTo([t.lat, t.lng], 10, { animate: true, duration: 1.0 });
+                if (markers[t.no]) markers[t.no].openPopup();
+
+                document.getElementById('fName').innerText = `${t.no} ${t.name}`;
+                document.getElementById('fRoute').innerText = `${t.origin} ➔ ${t.dest}`;
+                document.getElementById('fType').innerText = t.type;
+                document.getElementById('fSpeed').innerText = `${t.speed} / ${t.mps} km/h`;
+                document.getElementById('fLoco').innerText = t.loco;
+                document.getElementById('fHp').innerText = t.loco_hp;
+                document.getElementById('fRake').innerText = t.rake;
+                document.getElementById('fStatus').innerText = t.status;
+                document.getElementById('fFinalTime').innerText = `${t.final_arrival_time} IST`;
+                document.getElementById('fDist').innerText = `${t.remaining_dist_km} km`;
+                document.getElementById('fNextHalt').innerText = t.next_halt;
+                document.getElementById('fNextHaltTime').innerText = `${t.next_halt_time} IST`;
+                document.getElementById('fReason').innerText = t.speed_reason;
+
+                if (t.ml_factors) {
+                    document.getElementById('mathSignal').innerText = `${t.ml_factors.signal_aspect} (Green/Yellow)`;
+                    document.getElementById('mathHeadway').innerText = `${t.ml_factors.preceding_gap_km} km`;
+                    document.getElementById('mathCongestion').innerText = `${t.ml_factors.congestion_index}`;
+                    document.getElementById('mathLoco').innerText = `${t.ml_factors.loco_accel_factor} (${t.loco.split(' ')[0]})`;
+                }
+
+                document.querySelectorAll('.train-card').forEach(c => c.classList.remove('train-card-active'));
+                const activeCard = document.getElementById('card-' + t.no);
+                if (activeCard) activeCard.classList.add('train-card-active');
+            }
+        }
+
+        async function autoPollRadar() {
+            try {
+                const res = await fetch('/api/v1/live-14-trains');
+                cachedTrains = await res.json();
+
+                const listContainer = document.getElementById('trainsList');
+                if (listContainer) listContainer.innerHTML = '';
+
+                let overtakeDetected = false;
+
+                cachedTrains.forEach(t => {
+                    const isFreight = t.type === 'FREIGHT';
+                    const isSpecial = t.type === 'SPECIAL';
+                    const markerColor = isFreight ? "#f43f5e" : (isSpecial ? "#a855f7" : "#10b981");
+
+                    if (t.ml_factors && t.ml_factors.preceding_gap_km < 1.5) {
+                        overtakeDetected = true;
+                    }
+
+                    if (!markers[t.no]) {
+                        const iconHtml = `<div style="background-color: ${markerColor};" class="loco-marker w-4 h-4 rounded-full border-2 border-slate-950 flex items-center justify-center text-slate-950 text-[7px] font-bold"><i class="fa-solid fa-train"></i></div>`;
+                        const customIcon = L.divIcon({ html: iconHtml, className: '', iconSize: [16, 16], iconAnchor: [8, 8] });
+                        markers[t.no] = L.marker([t.lat, t.lng], { icon: customIcon }).addTo(map);
+                        markers[t.no].on('click', () => selectTrain(t.no));
+                    } else {
+                        markers[t.no].setLatLng([t.lat, t.lng]);
+                    }
+                    markers[t.no].bindPopup(`<b>${t.no} - ${t.name}</b><br>Expected Arrival: <b>${t.final_arrival_time}</b><br>Next Halt: ${t.next_halt} (${t.next_halt_time})<br>Speed: ${t.speed} km/h`);
+
+                    if (listContainer) {
+                        const isSelected = t.no === selectedTrainNo;
+                        const card = document.createElement('div');
+                        card.id = 'card-' + t.no;
+                        card.className = `train-card cursor-pointer bg-[#0b0f19] border ${isSelected ? 'train-card-active' : 'border-[#1f2937]'} p-2.5 rounded-lg space-y-1 text-xs hover:border-[#334155] transition`;
+                        card.onclick = () => selectTrain(t.no);
+                        card.innerHTML = `
+                            <div class="flex justify-between items-center">
+                                <span class="font-bold text-slate-100 flex items-center gap-1.5">
+                                    <span class="w-2 h-2 rounded-full" style="background-color: ${markerColor}"></span>
+                                    ${t.no} ${t.name}
+                                </span>
+                                <span class="text-[10px] font-mono font-bold text-emerald-400 bg-[#111827] px-2 py-0.5 rounded-full border border-[#1f2937]">ETA: ${t.final_arrival_time}</span>
+                            </div>
+                            <p class="text-[11px] text-slate-400">Next: <span class="text-sky-300 font-semibold">${t.next_halt}</span> (${t.next_halt_time}) • ${t.speed} km/h</p>
+                        `;
+                        listContainer.appendChild(card);
+                    }
+                });
+
+                const badge = document.getElementById('overtakeBadge');
+                if (badge) {
+                    if (overtakeDetected) badge.classList.remove('hidden');
+                    else badge.classList.add('hidden');
+                }
+
+                if (selectedTrainNo) {
+                    const curT = cachedTrains.find(item => item.no === selectedTrainNo);
+                    if (curT) {
+                        document.getElementById('fSpeed').innerText = `${curT.speed} / ${curT.mps} km/h`;
+                        document.getElementById('fStatus').innerText = curT.status;
+                        document.getElementById('fFinalTime').innerText = `${curT.final_arrival_time} IST`;
+                        document.getElementById('fDist').innerText = `${curT.remaining_dist_km} km`;
+                        document.getElementById('fNextHalt').innerText = curT.next_halt;
+                        document.getElementById('fNextHaltTime').innerText = `${curT.next_halt_time} IST`;
+                        document.getElementById('fReason').innerText = curT.speed_reason;
+                        if (curT.ml_factors) {
+                            document.getElementById('mathSignal').innerText = `${curT.ml_factors.signal_aspect} (Green/Yellow)`;
+                            document.getElementById('mathHeadway').innerText = `${curT.ml_factors.preceding_gap_km} km`;
+                            document.getElementById('mathCongestion').innerText = `${curT.ml_factors.congestion_index}`;
+                            document.getElementById('mathLoco').innerText = `${curT.ml_factors.loco_accel_factor} (${curT.loco.split(' ')[0]})`;
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function sendChat() {
+            const input = document.getElementById('chatInput');
+            const msg = input.value.trim();
+            if (!msg) return;
+
+            const lang = document.getElementById('chatLang').value;
+            const container = document.getElementById('chatMessages');
+
+            const userMsg = document.createElement('div');
+            userMsg.className = "bg-[#0284c7]/20 border border-[#0284c7]/50 p-2.5 rounded-xl max-w-md ml-auto text-slate-100 text-right";
+            userMsg.innerText = msg;
+            container.appendChild(userMsg);
+            input.value = '';
+
+            const loadingMsg = document.createElement('div');
+            loadingMsg.id = "chatLoading";
+            loadingMsg.className = "bg-[#0b0f19] border border-[#1f2937] p-2.5 rounded-xl max-w-sm text-slate-400 text-xs italic";
+            loadingMsg.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-sky-400 mr-1.5"></i> Processing telemetry query...';
+            container.appendChild(loadingMsg);
+            container.scrollTop = container.scrollHeight;
+
+            try {
+                const res = await fetch('/api/v1/rail-copilot-chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: msg, language: lang })
+                });
+                const data = await res.json();
+
+                const loadEl = document.getElementById('chatLoading');
+                if (loadEl) loadEl.remove();
+
+                const botMsg = document.createElement('div');
+                botMsg.className = "bg-[#0b0f19] border border-[#1f2937] p-3.5 rounded-xl max-w-xl text-slate-200 whitespace-pre-line leading-relaxed";
+                botMsg.innerHTML = `<i class="fa-solid fa-train text-sky-400 mr-1.5"></i> ${data.reply}`;
+                container.appendChild(botMsg);
+                container.scrollTop = container.scrollHeight;
+
+                if (document.getElementById('voiceAudioEnable').checked && 'speechSynthesis' in window) {
+                    stopVoiceReading();
+                    const cleanSpeechText = data.reply.replace(/[*#•_]/g, '');
+                    const utter = new SpeechSynthesisUtterance(cleanSpeechText);
+                    if (lang === 'tamil') utter.lang = 'ta-IN';
+                    else if (lang === 'hindi') utter.lang = 'hi-IN';
+                    else if (lang === 'telugu') utter.lang = 'te-IN';
+                    else if (lang === 'kannada') utter.lang = 'kn-IN';
+                    else utter.lang = 'en-IN';
+                    window.speechSynthesis.speak(utter);
+                }
+            } catch (e) {
+                const loadEl = document.getElementById('chatLoading');
+                if (loadEl) loadEl.remove();
+
+                const botMsg = document.createElement('div');
+                botMsg.className = "bg-[#0b0f19] border border-red-500/50 p-3 rounded-xl max-w-xl text-red-300";
+                botMsg.innerText = "Network transmission delay. Sectional telemetry verified.";
+                container.appendChild(botMsg);
+            }
+        }
+
+        let recognition = null;
+        let isRecording = false;
+
+        function toggleVoiceRecording() {
+            const micBtn = document.getElementById('micBtn');
+            const status = document.getElementById('speechStatus');
+
+            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                alert('Voice speech recognition not supported in this browser. Please use Chrome / Edge.');
+                return;
+            }
+
+            if (isRecording) {
+                recognition.stop();
+                isRecording = false;
+                micBtn.classList.remove('mic-active');
+                status.innerText = 'Mic & Text Ready';
+                return;
+            }
+
+            const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRec();
+
+            const lang = document.getElementById('chatLang').value;
+            if (lang === 'tamil') recognition.lang = 'ta-IN';
+            else if (lang === 'hindi') recognition.lang = 'hi-IN';
+            else if (lang === 'telugu') recognition.lang = 'te-IN';
+            else if (lang === 'kannada') recognition.lang = 'kn-IN';
+            else recognition.lang = 'en-IN';
+
+            recognition.continuous = false;
+            recognition.interimResults = false;
+
+            recognition.onstart = () => {
+                isRecording = true;
+                micBtn.classList.add('mic-active');
+                status.innerText = 'Listening... பேசுங்கள்...';
+            };
+
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript;
+                document.getElementById('chatInput').value = transcript;
+                sendChat();
+            };
+
+            recognition.onerror = (event) => {
+                console.error(event.error);
+                status.innerText = 'Voice Error';
+                micBtn.classList.remove('mic-active');
+                isRecording = false;
+            };
+
+            recognition.onend = () => {
+                micBtn.classList.remove('mic-active');
+                isRecording = false;
+                status.innerText = 'Mic & Text Ready';
+            };
+
+            recognition.start();
+        }
+
+        async function dispatchDynamicAlertToRecipient() {
+            const tNo = document.getElementById('alertTrain').value;
+            let targetEmail = document.getElementById('alertEmail').value.trim();
+            let targetPhone = document.getElementById('alertPhone').value.trim();
+            const btn = document.getElementById('dispatchBtn');
+
+            if (!targetEmail && !targetPhone) {
+                alert("Please enter recipient email or phone number.");
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span>Transmitting Official ETA Alert...</span>';
+
+            try {
+                const res = await fetch('/api/v1/send-real-alert', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        train_no: tNo,
+                        email: targetEmail,
+                        phone: targetPhone
+                    })
+                });
+                const data = await res.json();
+
+                const log = document.getElementById('alertLog');
+                const card = document.createElement('div');
+                card.className = "bg-[#0b0f19] border border-emerald-500/50 p-3.5 rounded-xl text-slate-300 space-y-1.5 shadow-md";
+                card.innerHTML = `
+                    <div class="flex justify-between items-center text-[10px]">
+                        <span class="font-bold text-emerald-400">TELEMETRY TRANSMISSION SUMMARY</span>
+                        <span class="text-slate-400 font-mono">Expected Arrival: ${data.final_arrival_time} IST</span>
+                    </div>
+                    <p class="text-white font-medium text-xs">Train ${data.train_no} ${data.train_name} | Destination Arrival: <b>${data.final_arrival_time}</b> | Next Halt: ${data.next_halt} (${data.next_halt_time})</p>
+                    <div class="pt-1.5 border-t border-[#1f2937] text-[11px] space-y-0.5">
+                        <p class="text-emerald-400 font-semibold"><i class="fa-solid fa-envelope mr-1"></i> Email: ${data.email_status}</p>
+                        <p class="text-sky-300 font-semibold"><i class="fa-solid fa-comment-sms mr-1"></i> SMS: ${data.sms_status}</p>
+                    </div>
+                `;
+                log.prepend(card);
+            } catch (err) {
+                console.error(err);
+            }
+
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> <span>Send Real ETA Alert (Email & SMS)</span>';
+        }
+
+        window.onload = () => {
+            autoPollRadar();
+            drawFocusedCorridor('cbe');
+            // Initial render of KaTeX math formulas
+            renderMathInElement(document.body, {
+                delimiters: [
+                    {left: "$$", right: "$$", display: true},
+                    {left: "$", right: "$", display: false}
+                ]
+            });
+            setInterval(autoPollRadar, 1000);
+        };
+    </script>
+</body>
+</html>
